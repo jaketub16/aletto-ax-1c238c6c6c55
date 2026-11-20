@@ -69,7 +69,7 @@ function platOk(ch) { return S.plat === 'all' ? true : S.plat === 'paid' ? PAID.
 
 // ---------------- aggregation (mirrors agg.py) ----------------
 const CNT = ['leads', 'ql', 'qu', 'sb', 'ss', 'sn', 'qs', 'cb', 'ch', 'cn', 'sd', 'ab', 'ah', 'w'];
-const zero = () => ({spend: 0, cs: 0, impr: 0, clicks: 0, pl: 0, rev: 0, cash: 0, xcash: 0, ...Object.fromEntries(CNT.map(k => [k, 0])), xn: Object.fromEntries(CNT.map(k => [k, 0])), ids: Object.fromEntries(CNT.map(k => [k, []]))});
+const zero = () => ({spend: 0, cs: 0, impr: 0, clicks: 0, pl: 0, rev: 0, cash: 0, xcash: 0, ...Object.fromEntries(CNT.map(k => [k, 0])), xn: Object.fromEntries(CNT.map(k => [k, 0])), xu: Object.fromEntries(CNT.map(k => [k, 0])), ids: Object.fromEntries(CNT.map(k => [k, []]))});
 function hits(L, a, b) {
   const inr = d => d != null && d >= a && d <= b, M = L.m, coh = S.basis === 'cohort';
   const created = inr(L.cd);
@@ -81,7 +81,7 @@ function hits(L, a, b) {
   return h;
 }
 function add(o, h, li, nr) {
-  for (const k of CNT) if (h[k]) { o[k]++; o.ids[k].push(li); if (nr) o.xn[k]++; }
+  for (const k of CNT) if (h[k]) { o[k]++; o.ids[k].push(li); if (nr) o.xn[k]++; if (nr === 2) o.xu[k]++; }
   o.rev += h.rev; o.cash += h.cash; if (nr) o.xcash += h.cash;
 }
 function pathsOf(i) { const k = P.ents[i].k, out = [k[0], k[0] + '›' + k[1], k[0] + '›' + k[1] + '›' + k[2]]; if (k[3]) out.push(out[2] + '›' + k[3]); return out; }
@@ -99,7 +99,7 @@ function aggregate(a, b, platFilter = true) {
     const i = L.a[S.model], ch = P.ents[i].k[0]; if (platFilter && !platOk(ch)) return;
     const h = hits(L, a, b); if (!h) return;
     if (!CNT.some(k => h[k]) && !h.cash) return;
-    const nr = !!P.ents[i].nr;  // old Meta account: spend not readable -> leads not in cost-per-stage
+    const nr = P.ents[i].nr || 0;  // old Meta account: spend not readable -> leads not in cost-per-stage
     for (const p of PATHS[i]) add(g(p), h, li, nr);
     add(T, h, li, nr);
   });
@@ -110,7 +110,16 @@ const cp = (o, k) => { const n = o[k] - (o.xn ? o.xn[k] : 0); return o.cs && n ?
 function costState(o, k) { // why a cost cell is blank: 'na' spend not readable, 'nt' no lead tracking, 'none' none of that step yet
   const n = o[k] - (o.xn ? o.xn[k] : 0);
   if (!o.cs) return o.spend ? 'nt' : (o[k] && o.xn && o.xn[k] === o[k] ? 'na' : '');
-  return n ? '' : 'none';
+  return n ? '' : (o[k] ? 'na' : 'none');  // all of this step came from leads whose spend can't be read
+}
+function wxTxt(h, f) { // weekly card version, from headline().excl[f] = [old-account, unmatched]
+  const e = h && h.excl && h.excl[f]; if (!e || !h.cost_spend) return '';
+  return `excl. ${[e[0] ? `${e[0]} old-account` : '', e[1] ? `${e[1]} unmatched Meta` : ''].filter(Boolean).join(' + ')}`;
+}
+function exclTxt(o, k) { // "(excl. 1 old-account)" whenever a cost is divided by fewer than the count shown
+  const n = o.xn ? o.xn[k] : 0; if (!n || !o.cs) return '';
+  const u = o.xu ? o.xu[k] : 0, a = n - u;
+  return `excl. ${[a ? `${a} old-account` : '', u ? `${u} unmatched Meta` : ''].filter(Boolean).join(' + ')}`;
 }
 function derived(o) {
   const s = o.spend;
@@ -141,16 +150,20 @@ function recon(a, b) {
   const raw = sum(R.raw), xo = sum(R.x_noopt), xt = sum(R.x_test), xd = sum(R.x_dup), exp = raw - xo - xt - xd;
   const li = sum(R.li), lic = sum(R.li_campaign), mh = sum(R.meta_heat), ig = sum(R.meta_ig);
   const checks = [
-    {ok: A.leads === exp, t: `${fmtN(raw)} new GHL contacts − ${fmtN(xo)} outbound/WhatsApp, no opt-in − ${fmtN(xt)} test/spam${xd ? ` − ${fmtN(xd)} duplicates` : ''} = ${fmtN(exp)} leads (all sources); portal ${fmtN(A.leads)}`, why: 'Raw count = every contact GHL created in the range (ET), no filters. Click to see every excluded contact and why.', act: 'excl'},
+    {ok: A.leads === exp, t: `${fmtN(raw)} new GHL contacts − ${fmtN(xo)} outbound/WhatsApp, no opt-in − ${fmtN(xt)} hiring/test${xd ? ` − ${fmtN(xd)} duplicates` : ''} = ${fmtN(exp)} leads (all sources); portal ${fmtN(A.leads)}`, why: 'Raw count = every contact GHL created in the range (ET), no filters. Click to see every excluded contact and why.', act: 'excl'},
     {ok: Math.abs(A.spend - (li + mh + ig)) < 0.05, t: `Spend ${fmt$(A.spend)} = LinkedIn ${fmt$(li)} + Meta ${fmt$(mh)} + IG boosts ${fmt$(ig)}`, why: 'Portal spend equals the sum of the ad account pulls. IG boosts have no lead tracking, so they are left out of cost per lead / Strat / Scope.'},
     {ok: Math.abs(li - lic) < 0.05, t: `LinkedIn ad-level = campaign-level (${fmt$(lic)})`, why: 'Two independent LinkedIn reports agree.'},
     {ok: !!R.pull_reaches_start, t: 'GHL contact pull covers the full window', why: `Oldest contact pulled: ${R.oldest_contact}`},
   ];
-  const heat0 = P.days.indexOf('2026-11-19'), oldLeads = A.xn.leads + A.xn.sb + A.xn.cb;
-  if ((heat0 < 0 || a < heat0) && (oldLeads || S.plat !== 'li')) checks.push({ok: false, warn: 'amber', t: `Old Meta account spend not included (before Nov 19)${A.xn.leads ? `: ${fmtN(A.xn.leads)} Meta leads have no readable spend, left out of costs` : ''}`, why: 'act_1624265171591278 is not readable (no ads_read). Its leads are counted; its spend is missing, so they are left out of every cost per stage.'});
-  const g = new Date(P.meta.generated), ls = lastSlot(), age = (Date.now() - g) / 36e5;
-  const missed = ls && +g < +ls - 10 * 6e4;
-  checks.push({ok: !missed, warn: missed ? 'red' : true, t: missed ? `Stale: last refresh ${Math.round(age)} h ago, missed the ${tfmt(ls.toISOString(), false)} run` : `Data ${age < 1 ? 'under 1 hour' : Math.round(age) + ' h'} old`, why: 'Scheduled refresh: weekdays 07:30 and 14:00 Madrid, plus Fri 10:30. Red after one missed run.'});
+  const heat0 = P.days.indexOf('2026-11-19'), oldLeads = A.xn.leads + A.xn.sb + A.xn.cb, xOld = A.xn.leads - A.xu.leads, xUn = A.xu.leads;
+  if ((heat0 < 0 || a < heat0) && (oldLeads || S.plat !== 'li')) checks.push({ok: false, warn: 'amber', t: `Old Meta account spend not included (before Nov 19)${A.xn.leads ? `: ${fmtN(xOld)} old-account${xUn ? ` + ${fmtN(xUn)} unmatched` : ''} Meta leads left out of costs` : ''}`, why: 'Old account act_1624265171591278 is not readable (no ads_read): its leads are counted, its spend is missing. Unmatched = a Meta lead whose link names no ad set, so it cannot be tied to readable spend. Both are left out of every cost per stage.'});
+  // freshness: judged on when the data was PULLED (oldest source), not when the site was built
+  const pu = P.meta.pulled || {}, pa = new Date(P.meta.pulled_at || P.meta.generated), ls = lastSlot(), age = (Date.now() - pa) / 36e5;
+  const oldestSrc = Object.entries(pu).sort((x, y) => x[1].localeCompare(y[1]))[0], newest = Object.values(pu).sort().slice(-1)[0];
+  const spread = newest ? (new Date(newest) - pa) / 36e5 : 0;
+  const missed = ls && +pa < +ls - 10 * 6e4, mixed = !missed && spread > 3;
+  const srcs = Object.entries(pu).map(([k, v]) => `${k} ${tfmt(v, false)}`).join(' · ');
+  checks.push({ok: !missed && !mixed, warn: missed ? 'red' : 'amber', t: missed ? `Stale: data pulled ${tfmt(pa.toISOString(), false)} (${oldestSrc ? oldestSrc[0] : 'oldest source'}), before the ${tfmt(ls.toISOString(), false)} run` : `Data pulled ${tfmt(pa.toISOString(), false)} Madrid${oldestSrc ? ` (oldest: ${oldestSrc[0]})` : ''} · ${age < 1 ? 'under 1 h' : Math.round(age) + ' h'} ago${mixed ? ` · sources ${Math.round(spread)} h apart` : ''}`, why: `Pulled at (oldest source): ${srcs}. Scheduled refresh: weekdays 07:30 and 14:00 Madrid, plus Fri 10:30. Red when the oldest source predates the last scheduled run; amber when sources were pulled more than 3 h apart.`});
   return checks;
 }
 function reconStrip(a, b) {
@@ -189,7 +202,8 @@ function cell(o, c) {
     if (k === 'cpcb' && v != null) cls = v <= P.meta.target_scope ? 'good' : 'bad';
     const base = {cpl: 'leads', cpql: 'ql', cpsb: 'sb', cpqs: 'qs', cpcb: 'cb', cpch: 'ch'}[k];
     if (base && v == null) { const st = costState(o, base); if (st) return `<td><span class="z nb" title="${NONE[st][1]}">${NONE[st][0]}</span></td>`; }
-    return `<td class="${cls}">${v == null ? '<span class="z">–</span>' : fmt$(v)}</td>`;
+    const ex = base && v != null ? exclTxt(o, base) : '';
+    return `<td class="${cls}"${ex ? ` title="Cost divided by ${o[base] - o.xn[base]}, not ${o[base]}: ${ex}"` : ''}>${v == null ? '<span class="z">–</span>' : fmt$(v)}${ex ? `<small>(${ex})</small>` : ''}</td>`;
   }
   if (kind === '%') return `<td>${v == null ? '<span class="z">–</span>' : pct(v)}</td>`;
   if (kind === 'x') return `<td>${v == null ? '<span class="z">–</span>' : v.toFixed(2) + '×'}</td>`;
@@ -225,9 +239,9 @@ function renderAds() {
   const rc = reconStrip(a, b);
   $('#arc').innerHTML = rc.h; wireRecon($('#arc'));
   const k = (l, v, s, cls = '', def = '') => `<div class="kpi"><div class="l">${l}${def ? `<span class="i" data-def="${def}">i</span>` : ''}</div><div class="v ${cls}">${rc.bad ? '<span class="z">check</span>' : v}</div><div class="s">${s}</div></div>`;
-  const cst = (v, base) => v != null ? fmt$(v) : (NONE[costState(T, base)] || ['–'])[0];
-  const xl = T.xn.leads ? ` · ${fmtN(T.xn.leads)} Meta leads with no readable spend left out` : '';
-  $('#kpis').innerHTML = k('Spend', fmt$(T.spend), `${fmtN(T.impr)} impressions · ${pct(T.ctr)} click-through`, '', 'spend') + k('Leads', fmtN(T.leads), `${cst(T.cpl, 'leads')} per lead${xl}${S.plat !== 'all' ? ` · ${fmtN(aggregate(a, b, false).T.leads)} all sources` : ''}`, '', 'leads')
+  const cst = (v, base) => v != null ? fmt$(v) + (exclTxt(T, base) ? ` (${exclTxt(T, base)})` : '') : (NONE[costState(T, base)] || ['–'])[0];
+  const xl = '';
+  $('#kpis').innerHTML = k('Spend', fmt$(T.spend), `${fmtN(T.impr)} impressions · ${pct(T.ctr)} click-through`, '', 'spend') + k('Leads', fmtN(T.leads), `${cst(T.cpl, 'leads').replace(' (', ' per lead (').replace(/^([^ (]+)$/, '$1 per lead')}${S.plat !== 'all' ? ` · ${fmtN(aggregate(a, b, false).T.leads)} all sources` : ''}`, '', 'leads')
     + k('Quality leads', fmtN(T.ql) + `<small>${pct(T.qlr)}</small>`, `${cst(T.cpql, 'ql')} each · ${fmtN(T.qu)} revenue unknown`, '', 'ql')
     + k('Strats booked', fmtN(T.sb), `${fmtN(T.ss)} showed · show rate ${pct(T.showr)} (excl. cancels)`, '', 'sb') + k('Qualified Strats', fmtN(T.qs), `${cst(T.cpqs, 'qs')} each`, '', 'qs')
     + k('Same-day Scope %', pct(T.sdr), `${fmtN(T.sd)} of ${fmtN(T.ss)} Strat shows booked a Scope that day`, '', 'sd')
@@ -275,7 +289,7 @@ function renderAds() {
 function notesAds(N) {
   const un = Object.entries(N).filter(([p]) => p.split('›').length === 2 && (p.endsWith('›Unattributed') || p.endsWith('Old Meta account (spend not readable)')));
   $('#anotes').innerHTML = `<div><h4>Unattributed, shown honestly</h4><ul>${un.map(([p, o]) => `<li><b>${esc(p.replace('›', ' › '))}</b>: ${fmtN(o.leads)} leads, ${fmtN(o.sb)} Strats, ${fmtN(o.cb)} Scopes booked, ${fmtN(o.ch)} held</li>`).join('') || '<li>None in this range.</li>'}</ul></div>
-  <div><h4>How to read it</h4><ul><li>Small % under a count = conversion from the step before it.</li><li><b>none yet</b> = money spent and none of that step yet.</li><li><b>spend not readable</b> = old Meta account (no access), <b>no lead tracking</b> = IG post boosts. Both are left out of every cost per step.</li><li>Sort by <b>Cost per qualified Strat</b> or <b>Cost per Scope held</b> to find winners (click the header, lowest first).</li></ul></div>
+  <div><h4>How to read it</h4><ul><li>Small % under a count = conversion from the step before it.</li><li><b>none yet</b> = money spent and none of that step yet.</li><li><b>spend not readable</b> = old Meta account (no access) or a Meta lead with no ad set in its link (unmatched); <b>no lead tracking</b> = IG post boosts. All are left out of every cost per step, and each cost says <b>(excl. N old-account)</b> when its count includes them.</li><li>Sort by <b>Cost per qualified Strat</b> or <b>Cost per Scope held</b> to find winners (click the header, lowest first).</li></ul></div>
   <div><h4>Basis</h4><ul><li>${S.basis === 'cohort' ? '<b>Lead cohort</b>: leads created in the range and every step they have reached so far.' : '<b>Activity date</b>: each step counted on the day it happened.'}</li><li>Days are US Eastern; lead times show Madrid and ET.</li></ul></div>`;
 }
 function trend(a, b) {
@@ -373,7 +387,7 @@ function renderLeads() {
 
 // ---------------- SALES view ----------------
 const OWNERS = ['Rian', 'Saloumeh', 'MXB', 'Jake'];
-const OWN_LABEL = {MXB: 'Michael (MXB)', Jake: 'Jake Roper'};
+const OWN_LABEL = {MXB: 'Michael Xavier Burns', Jake: 'Jake Roper'};
 function renderSales() {
   const [a, b] = rng(); const inr = d => d != null && d >= a && d <= b;
   const {N, T} = aggregate(a, b); derived(T);
@@ -383,11 +397,11 @@ function renderSales() {
     + k('Qualified Strats', fmtN(T.qs), `${pct(dv(T.qs, T.ss))} of shows`, 'qs') + k('Same-day Scope %', pct(T.sdr), `${fmtN(T.sd)} of ${fmtN(T.ss)} shows booked a Scope that day`, 'sd')
     + k('Scopes held', fmtN(T.ch), `${fmtN(T.cb)} booked · ${pct(T.hr)} show rate (held ÷ held + no-show)`, 'ch') + k('Alignments held', fmtN(T.ah), `${fmtN(T.ab)} booked`, 'ah')
     + k('Won', fmtN(T.w), `${fmt$(T.rev)} deal value`, 'w') + k('Cash', fmt$(T.cash), 'payments from won leads', 'cash')
-    + k('Stuck deals', fmtN(P.stuck.filter(s => platOk(P.ents[P.leads[s[0]].a[S.model]].k[0])).length), 'open, no stage move in 14+ days', 'stuck') + k('Cost per Scope held', T.cpch != null ? fmt$(T.cpch) : (NONE[costState(T, 'ch')] || ['–'])[0], `$${P.meta.target_scope} target is per Scope booked`, 'cpch');
+    + k('Stuck deals', fmtN(P.stuck.filter(s => platOk(P.ents[P.leads[s[0]].a[S.model]].k[0])).length), 'open, no stage move in 14+ days', 'stuck') + k('Cost per Scope held', T.cpch != null ? fmt$(T.cpch) + (exclTxt(T, 'ch') ? `<small>(${exclTxt(T, 'ch')})</small>` : '') : (NONE[costState(T, 'ch')] || ['–'])[0], `$${P.meta.target_scope} target is per Scope booked`, 'cpch');
   const steps = [['leads', 'Leads'], ['ql', 'Quality leads'], ['sb', 'Strats booked'], ['ss', 'Strats showed'], ['qs', 'Qualified Strats'], ['cb', 'Scopes booked'], ['ch', 'Scopes held'], ['ah', 'Alignments held'], ['w', 'Won']];
   const mx = Math.max(1, T.leads);
   $('#fun').innerHTML = steps.map(([kk, l], j) => { const v = T[kk], pv = j ? T[steps[j - 1][0]] : null, cost = cp(T, kk);
-    return `<div class="r"><div>${l}<span class="i" data-def="${kk}">i</span></div><div class="bar0"><div style="width:${Math.max(0.4, v / mx * 100)}%"></div></div><div class="v c" data-m="${kk}"><b>${fmtN(v)}</b>${j ? pct(dv(v, pv)) : ''}${cost ? ` · ${fmt$(cost)}` : ''}</div></div>`; }).join('');
+    return `<div class="r"><div>${l}<span class="i" data-def="${kk}">i</span></div><div class="bar0"><div style="width:${Math.max(0.4, v / mx * 100)}%"></div></div><div class="v c" data-m="${kk}"><b>${fmtN(v)}</b>${j ? pct(dv(v, pv)) : ''}${cost ? ` · ${fmt$(cost)}${exclTxt(T, kk) ? ` <small class="z">(${exclTxt(T, kk)})</small>` : ''}` : (T[kk] && costState(T, kk) === 'na' ? ' · <span class="z">spend not readable</span>' : '')}</div></div>`; }).join('');
   $('#funleg').textContent = S.basis === 'cohort' ? 'lead cohort' : 'activity date';
   $$('#v-sales .bl').forEach(x => x.textContent = S.basis === 'cohort' ? 'leads created in range' : 'dated in range');
   $$('#fun .v.c').forEach(e => e.addEventListener('click', () => leadList(T.ids[e.dataset.m], (DEF[e.dataset.m] || [e.dataset.m])[0])));
@@ -426,7 +440,7 @@ function renderSales() {
   const lv = S.plat === 'all' ? 0 : 2;
   const srcRows = Object.entries(N).filter(([p]) => p.split('›').length === lv + 1).map(([p, o]) => [p, derived(o)]).filter(([, o]) => o.leads || o.sb || o.cb).sort((x, y) => y[1].leads - x[1].leads).slice(0, 25);
   $('#bysrc').innerHTML = `<thead><tr><th>${lv ? 'Ad set' : 'Source'}</th><th>Leads</th><th>Quality</th><th>Strats</th><th title="Strats booked ÷ leads">Lead → Strat %</th><th>Strats showed</th><th>Qualified Strats</th><th>Scopes booked</th><th title="Scopes booked ÷ qualified Strats">Qualified Strat → Scope %</th><th>Scopes held</th><th>Won</th><th>Cost per qualified Strat</th><th>Cost per Scope held</th></tr></thead><tbody>
-   ${srcRows.map(([p, o]) => `<tr><td title="${esc(p)}">${esc(nmT(p.split('›').slice(-1)[0]))}</td><td>${o.leads}</td><td>${o.ql}</td><td>${o.sb}</td><td>${pct(dv(o.sb, o.leads))}</td><td>${o.ss}</td><td>${o.qs}</td><td>${o.cb}</td><td>${pct(dv(o.cb, o.qs))}</td><td>${o.ch}</td><td>${o.w}</td><td>${o.cpqs != null ? fmt$(o.cpqs) : `<span class="z">${(NONE[costState(o, 'qs')] || ['–'])[0]}</span>`}</td><td>${o.cpch != null ? fmt$(o.cpch) : `<span class="z">${(NONE[costState(o, 'ch')] || ['–'])[0]}</span>`}</td></tr>`).join('')}</tbody>`;
+   ${srcRows.map(([p, o]) => `<tr><td title="${esc(p)}">${esc(nmT(p.split('›').slice(-1)[0]))}</td><td>${o.leads}</td><td>${o.ql}</td><td>${o.sb}</td><td>${pct(dv(o.sb, o.leads))}</td><td>${o.ss}</td><td>${o.qs}</td><td>${o.cb}</td><td>${pct(dv(o.cb, o.qs))}</td><td>${o.ch}</td><td>${o.w}</td><td>${o.cpqs != null ? fmt$(o.cpqs) + (exclTxt(o, 'qs') ? `<small>(${exclTxt(o, 'qs')})</small>` : '') : `<span class="z">${(NONE[costState(o, 'qs')] || ['–'])[0]}</span>`}</td><td>${o.cpch != null ? fmt$(o.cpch) + (exclTxt(o, 'ch') ? `<small>(${exclTxt(o, 'ch')})</small>` : '') : `<span class="z">${(NONE[costState(o, 'ch')] || ['–'])[0]}</span>`}</td></tr>`).join('')}</tbody>`;
   // sales list
   const sl = P.leads.map((L, i) => [L, i]).filter(([L]) => L.m.w != null && (S.basis === 'cohort' ? inr(L.cd) : inr(L.m.w)) && platOk(P.ents[L.a[S.model]].k[0]));
   $('#slist').innerHTML = sl.length ? `<ul class="ll">${sl.map(([L, i]) => `<li data-l="${i}"><div>${esc(L.n)} <small>${esc(srcPath(L))} · owner ${esc(L.owner || '–')}</small></div><div class="num">${L.m.rev ? fmt$(L.m.rev) : '<span class="z">no value</span>'} · ${fmt$(L.m.cash.reduce((s, x) => s + x[1], 0))} cash</div></li>`).join('')}</ul>` : '<div class="empty">No sales in this range for this filter.</div>';
@@ -478,13 +492,13 @@ function weekly() {
     const recH = r => { const refs = (r.refs && r.refs.length) ? r.refs : recRows(r.text + ' ' + (r.note || '')).map(p => ({p, m: 'cpqs'}));
       return refs.map(({p, m}) => { const o = AN[p] || derived(zero()), col = COLS.find(c => c[0] === m) || [m, m], nm = p.split('›').slice(-1)[0];
         const base = {cpl: 'leads', cpql: 'ql', cpsb: 'sb', cpqs: 'qs', cpcb: 'cb', cpch: 'ch'}[m];
-        const v = col[2] === '$' ? (o[m] != null ? fmt$(o[m]) : (NONE[costState(o, base)] || ['–'])[0]) : fmtN(o[m]);
+        const v = col[2] === '$' ? (o[m] != null ? fmt$(o[m]) + (exclTxt(o, base) ? ` (${exclTxt(o, base)})` : '') : (NONE[costState(o, base)] || ['–'])[0]) : fmtN(o[m]);
         return `<div class="meta recnum">Now, last 14 days (${S.basis === 'cohort' ? 'lead cohort' : 'event date'}) · <b>${esc(nmT(nm))}</b>: <b class="big">${col[1]} ${v}</b> <span class="z">(${fmt$(o.spend)} spend · ${fmtN(o.leads)} leads · ${fmtN(o.qs)} qualified Strats · ${fmtN(o.cb)} Scopes booked · ${fmtN(o.ch)} held)</span> <a href="#" class="golink" data-p="${esc(p)}">open row →</a></div>`; }).join(''); };
     return `<div class="wk ${op ? 'open' : ''}" data-w="${w.start}"><div class="h"><span class="car">›</span><div class="lab">${esc(w.label)}<small>${w.partial ? 'in progress · ' : ''}snapshot ${w.frozen_at ? dfmt(w.frozen_at) : ''}</small></div>
-    <div class="hl num"><span><b>${fmt$(h.spend)}</b>spend</span><span><b>${fmtN(h.leads)}</b>leads</span><span><b>${fmtN(h.strats)}</b>Strats</span><span><b>${fmtN(h.scopes)}</b>Scopes booked</span><span><b>${fmtN(h.scopes_held)}</b>held</span><span><b class="${h.cp_scope != null ? (h.cp_scope <= 600 ? 'good' : 'bad') : ''}">${fmt$(h.cp_scope)}</b>per Scope</span><span><b>${fmtN(h.sales)}</b>${h.sales === 1 ? 'sale' : 'sales'}</span></div><div class="cnt">${cnt}</div></div>
+    <div class="hl num"><span><b>${fmt$(h.spend)}</b>spend</span><span><b>${fmtN(h.leads)}</b>leads</span><span><b>${fmtN(h.strats)}</b>Strats</span><span><b>${fmtN(h.scopes)}</b>Scopes booked</span><span><b>${fmtN(h.scopes_held)}</b>held</span><span><b class="${h.cp_scope != null ? (h.cp_scope <= 600 ? 'good' : 'bad') : ''}">${fmt$(h.cp_scope)}</b>per Scope${wxTxt(h, 'cb') ? ` (${wxTxt(h, 'cb')})` : ''}</span><span><b>${fmtN(h.sales)}</b>${h.sales === 1 ? 'sale' : 'sales'}</span></div><div class="cnt">${cnt}</div></div>
     <div class="b"><table class="wkt num"><thead><tr><th>Channel</th><th>Spend</th><th>Leads</th><th>Cost per lead</th><th>Strats booked</th><th>Showed</th><th>Qualified</th><th>Scopes booked</th><th>Cost per Scope</th><th>Scopes held</th><th>Won</th><th>Cash</th></tr></thead><tbody>
-    ${chs.map(([c, v]) => { const wc = (x, n) => x != null ? fmt$(x) : (v.spend && !v.cost_spend ? '<span class="z">no lead tracking</span>' : (n && v.unreadable_leads >= n ? '<span class="z">spend not readable</span>' : (v.spend ? '<span class="z">none yet</span>' : '<span class="z">–</span>')));
-      return `<tr><td><span class="dot" style="background:${CC[c] || '#666'}"></span>${esc(c)}</td><td>${fmt$(v.spend)}${v.cost_spend != null && v.spend - v.cost_spend > 1 ? `<br><span class="z" title="IG post boosts, no lead tracking">${fmt$(v.spend - v.cost_spend)} IG boosts</span>` : ''}</td><td>${fmtN(v.leads)}${v.unreadable_leads ? `<br><span class="z" title="From the old Meta account: spend not readable, left out of cost">${fmtN(v.unreadable_leads)} old acct</span>` : ''}</td><td>${wc(v.cpl, v.leads)}</td><td>${fmtN(v.strats)}</td><td>${fmtN(v.showed)}</td><td>${fmtN(v.qual_strats)}</td><td>${fmtN(v.scopes)}</td><td>${wc(v.cp_scope, v.scopes)}</td><td>${fmtN(v.scopes_held)}</td><td>${fmtN(v.sales)}</td><td>${fmt$(v.cash)}</td></tr>`; }).join('')}</tbody></table>
+    ${chs.map(([c, v]) => { const wc = (x, n, f) => { const e = (v.excl && v.excl[f]) || [0, 0], ex = wxTxt(v, f); return x != null ? fmt$(x) + (ex ? `<br><span class="z">(${ex})</span>` : '') : (v.spend && !v.cost_spend ? '<span class="z">no lead tracking</span>' : (n && e[0] + e[1] >= n ? '<span class="z">spend not readable</span>' : (v.spend ? '<span class="z">none yet</span>' : '<span class="z">–</span>'))); };
+      return `<tr><td><span class="dot" style="background:${CC[c] || '#666'}"></span>${esc(c)}</td><td>${fmt$(v.spend)}${v.cost_spend != null && v.spend - v.cost_spend > 1 ? `<br><span class="z" title="IG post boosts, no lead tracking">${fmt$(v.spend - v.cost_spend)} IG boosts</span>` : ''}</td><td>${fmtN(v.leads)}</td><td>${wc(v.cpl, v.leads, 'leads')}</td><td>${fmtN(v.strats)}</td><td>${fmtN(v.showed)}</td><td>${fmtN(v.qual_strats)}</td><td>${fmtN(v.scopes)}</td><td>${wc(v.cp_scope, v.scopes, 'cb')}</td><td>${fmtN(v.scopes_held)}</td><td>${fmtN(v.sales)}</td><td>${fmt$(v.cash)}</td></tr>`; }).join('')}</tbody></table>
     <div class="cols"><div><h5>Recommended next steps</h5>${recs.length ? recs.map(r => `<div class="rec"><span class="st ${r.status}">${r.status}</span><div>${esc(r.text)}<div class="meta">${r.follow_up ? 'Follow up ' + esc(r.follow_up) : ''}${r.note ? ' · ' + esc(r.note) : ''}</div>${recH(r)}</div></div>`).join('') : '<div class="empty">None for this filter.</div>'}</div>
     <div><h5>What we actually did</h5>${(w.changes || []).length ? w.changes.map(c => `<div class="chg"><div class="w">${esc(c.when)}${c.by ? ' · ' + esc(c.by) : ''}</div><div>${esc(c.what)}</div>${c.why ? `<div class="ba">Why: ${esc(c.why)}</div>` : ''}${c.before || c.after ? `<div class="ba num">${esc(c.before)} → ${esc(c.after)}</div>` : ''}</div>`).join('') : '<div class="empty">No changes logged.</div>'}</div></div>
     <div class="meta" style="color:var(--dim);font-size:11.5px;margin-top:12px">Week numbers: ${w.method === 'v2' ? 'rebuilt with today\'s counting (GHL truth, event dates, paid-touch rule). Cost per step leaves out IG boosts (no lead tracking) and old-Meta leads (spend not readable).' : 'old portal counting (frozen when saved).'} Each rec shows its live 14-day number.</div></div></div>`;
@@ -508,8 +522,10 @@ function syncBar() {
   $('#tdsw').classList.toggle('on', S.today); $('#fullsw').classList.toggle('on', S.full); $('#zsw').classList.toggle('on', S.hz);
   $('#rtxt').textContent = `${rangeText()} · ${S.basis === 'cohort' ? 'Lead cohort' : 'Activity date'}`;
 }
+function tabFade() { const t = $('#tabs'); if (t) t.classList.toggle('more', t.scrollWidth - t.scrollLeft - t.clientWidth > 2); }
+function tabIntoView() { const a = document.querySelector('.tabs .on, .tabs [aria-selected="true"]'); if (a && a.scrollIntoView) a.scrollIntoView({block: 'nearest', inline: 'nearest'}); }
 function show(v) {
-  S.view = v; $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v));
+  S.view = v; $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.v === v)); tabIntoView(); tabFade();
   $$('section').forEach(s => s.style.display = s.id === 'v-' + v ? 'block' : 'none');
   $('#gbar').style.display = ['weekly', 'defs'].includes(v) ? 'none' : 'flex';
   render();
@@ -524,12 +540,14 @@ function start() {
   $('#gate').style.display = 'none'; $('#app').style.display = 'block';
   for (const [k, l, t] of P.defs) DEF[k] = [l, t];
   DEF.stuck = ['Stuck deals', 'Open Sales Pipeline deals (not Lost / Unqualified) whose stage has not changed in more than 14 days. Click a number to see them.'];
-  const g = new Date(P.meta.generated);
-  $('#upd').innerHTML = `Last refreshed ${g.toLocaleString('en-GB', {timeZone: MAD, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})} Madrid · ${g.toLocaleString('en-US', {timeZone: NY, hour: 'numeric', minute: '2-digit'})} ET`;
+  const g = new Date(P.meta.pulled_at || P.meta.generated), b = new Date(P.meta.generated);
+  const f = (d) => `${d.toLocaleString('en-GB', {timeZone: MAD, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})} Madrid · ${d.toLocaleString('en-US', {timeZone: NY, hour: 'numeric', minute: '2-digit'})} ET`;
+  $('#upd').innerHTML = `Data pulled at ${f(g)}`; $('#upd').title = `Oldest source pull. Site built ${f(b)}.`;
   const d0 = $('#d0'), d1 = $('#d1'); d0.min = d1.min = P.days[0]; d0.max = d1.max = P.days[P.days.length - 1];
   d0.value = P.days[Math.max(0, P.days.length - 15)]; d1.value = P.days[P.days.length - 2];
   $('#lch').innerHTML = '<option value="">All</option>' + P.meta.channels.map(c => `<option>${esc(c)}</option>`).join('');
   $$('#tabs button').forEach(b => b.addEventListener('click', () => show(b.dataset.v)));
+  $('#tabs').addEventListener('scroll', tabFade, {passive: true}); addEventListener('resize', tabFade);
   $$('#rng button').forEach(b => b.addEventListener('click', () => { S.r = b.dataset.r; render(); }));
   [d0, d1].forEach(x => x.addEventListener('change', () => { S.r = 'c'; render(); }));
   $$('#plat button').forEach(b => b.addEventListener('click', () => { S.plat = b.dataset.p; render(); }));

@@ -182,3 +182,11 @@ td:first-child{white-space:normal}
  .wk .h .hl{flex-wrap:wrap;gap:6px 12px}
  body,#app{max-width:100vw;overflow-x:hidden}
 }
+
+/* v2.2: cost exclusion notes + mobile tab bar */
+td small,.kpi small{display:block;font-size:10px;color:var(--mut);font-weight:400;white-space:nowrap}
+@media (max-width:640px){
+ .tabs{overflow-x:auto;scrollbar-width:none;gap:0;padding:2px}.tabs::-webkit-scrollbar{display:none}
+ .tabs button{padding:6px 7px;font-size:12px}
+ .tabs.more{-webkit-mask-image:linear-gradient(90deg,#000 85%,transparent);mask-image:linear-gradient(90deg,#000 85%,transparent)}
+}
