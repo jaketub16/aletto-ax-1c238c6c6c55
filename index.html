@@ -47,7 +47,7 @@
 <section id="v-leads" style="display:none">
 <div class="tw"><div class="tbar"><input type="search" id="lq" placeholder="Search name, email, company, ad…">
  <label class="ctl">Show <select id="lscope"><option value="created">Created in range</option><option value="active">Any activity in range</option><option value="all">All since Sep 21</option></select></label>
- <label class="ctl">Reached <select id="lms"><option value="">Any stage</option><option value="ql">Quality lead</option><option value="sb">Strat booked</option><option value="ss">Strat showed</option><option value="qs">Qualified Strat</option><option value="cb">Scope booked</option><option value="ch">Scope held</option><option value="w">Won</option></select></label>
+ <label class="ctl">Reached <select id="lms"><option value="">Any stage</option><option value="ql">Quality lead</option><option value="qu">Revenue unknown</option><option value="sb">Strat booked</option><option value="ss">Strat showed</option><option value="qs">Qualified Strat</option><option value="cb">Scope booked</option><option value="ch">Scope held</option><option value="w">Won</option></select></label>
  <label class="ctl">Channel <select id="lch"><option value="">All</option></select></label>
  <span class="sp" id="lcount"></span></div>
 <table class="lt" id="ltbl"><thead></thead><tbody></tbody></table>
@@ -58,10 +58,10 @@
 <div id="src"></div>
 <div class="kpis" id="skpis"></div>
 <div class="grid2"><div class="panel"><h3>Funnel<span class="leg" id="funleg"></span></h3><div class="fun" id="fun"></div></div>
-<div class="panel"><h3>Strat show rate · calls dated in range</h3><div id="showr"></div></div></div>
-<div class="g3"><div class="panel"><h3>Strat reps · calls dated in range</h3><div id="reps"></div></div><div class="panel"><h3>Scope calls · dated in range</h3><div id="sreps"></div></div></div>
+<div class="panel"><h3>Strat show rate · <span class="bl"></span></h3><div class="tw" style="border:0" id="showr"></div></div></div>
+<div class="g3"><div class="panel"><h3>Sales owners · <span class="bl"></span></h3><div id="reps"></div></div><div class="panel"><h3>Scope calls · <span class="bl"></span></h3><div id="sreps"></div></div></div>
 <div class="panel" style="margin-bottom:18px"><h3>Funnel by source</h3><div class="tw" style="border:0"><table id="bysrc"></table></div></div>
-<div class="panel"><h3>Sales in range</h3><div id="slist"></div></div>
+<div class="panel"><h3>Sales · <span class="bl"></span></h3><div id="slist"></div></div>
 </section>
 
 <section id="v-sources" style="display:none">
@@ -71,7 +71,7 @@
 
 <section id="v-weekly" style="display:none">
 <div class="bar"><div class="seg" id="wf"><button data-s="all" class="on">All recs</button><button data-s="Open">Open</button><button data-s="Done">Done</button><button data-s="Declined">Declined</button></div>
-<span class="range">Weeks run Fri–Thu ET. Numbers are frozen snapshots taken when each week was saved.</span></div>
+<span class="range">Weeks run Fri–Thu ET. Numbers rebuilt Nov 20 with today's counting (GHL, event dates); recs and change log unchanged.</span></div>
 <div id="weeks"></div>
 </section>
 
